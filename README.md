@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HH Goa 2026 — Builder ID Card Generator
 
-## Getting Started
+Upload a photo → crop/reposition it → fill in name, role, and a generated
+"builder title" → get a real on-brand HH Goa 2026 badge PNG, downloadable and
+shareable to X with `#FrameInGoa`. Built for the HH Goa 2026 shortlisting task.
 
-First, run the development server:
+Everything (HEIC conversion, cropping, "Painted Mode" filter, card
+compositing) runs client-side on `<canvas>` — no upload round-trip, no
+loading screen. The only server calls are optional: storing a copy of the
+finished card so a shared **link**'s preview shows the actual graphic.
+
+## Brand fidelity
+
+Colors and fonts are not approximated — they were extracted directly from
+`hhgoa.com`'s own shipped CSS (`#0b6839` green / `#fee101` yellow / `#ff0080`
+pink / `#fffbe8` cream, `Imbue` + `Victor Mono`). The beach-scene backdrop and
+card artwork are original SVG/canvas work in that same palette, not traced or
+hotlinked from their assets.
+
+## Run locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Scripts
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `scripts/qa-smoke.mjs` — headless end-to-end visual check (upload → crop →
+  generate → share). See `.claude/skills/run-app/SKILL.md`.
+- `scripts/gen-og.mjs` — regenerates `public/og-default.png`.
+- `scripts/gen-icon.mjs` — regenerates `src/app/icon.png`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploying (Vercel)
 
-## Learn More
+1. `npx vercel login`, then from this directory: `npx vercel link` (or `vercel
+   --prod` directly, which links on first run).
+2. **Enable the share-link OG preview**: in the Vercel dashboard, add a Blob
+   store to the project (Storage → Create → Blob) — this sets
+   `BLOB_READ_WRITE_TOKEN` automatically. Without it, `/api/upload-card`
+   fails closed and "Share to X" still works, just as a text-only tweet
+   (no rich link preview) instead of a linked card.
+3. Set `NEXT_PUBLIC_SITE_URL` to the production URL (needed so share links
+   and Open Graph tags point at the deployed domain, not `localhost`).
+4. `npx vercel --prod`.
 
-To learn more about Next.js, take a look at the following resources:
+## Known gaps before final submission
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- HEIC upload is implemented (`heic2any`, dynamically imported) but hasn't
+  been exercised with a real iPhone photo — verify on an actual device.
+- Real-device mobile QA (touch pinch-to-zoom in the cropper) has only been
+  simulated in headless Chromium so far.

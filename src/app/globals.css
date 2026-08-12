@@ -1,26 +1,100 @@
 @import "tailwindcss";
 
+/*
+ * Real HH Goa 2026 brand tokens — extracted directly from hhgoa.com's shipped
+ * CSS bundle (hex values confirmed in the compiled stylesheet, not eyeballed
+ * off screenshots):
+ *   #0b6839  forest green   (18 occurrences — primary background)
+ *   #fee101  sun yellow     (18 occurrences — wordmark / accents)
+ *   #ff0080  hot pink       (9 occurrences  — गोवा sticker / tags)
+ *   #fffbe8  cream          (card / paper background)
+ * Fonts confirmed the same way: `Imbue` (display serif) + `Victor Mono`
+ * (monospace), both free Google Fonts, loaded via next/font in layout.tsx.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --hh-green: #0b6839;
+  --hh-green-dark: #073d21;
+  --hh-yellow: #fee101;
+  --hh-pink: #ff0080;
+  --hh-cream: #fffbe8;
+
+  /* Bland (pre-result) theme: the site starts deliberately colorless.
+     Color only shows up once a card is generated (Step 4 of the plan). */
+  --bland-bg: #f4f4f2;
+  --bland-fg: #1a1a1a;
+  /* The muted/eyebrow/label text sits directly on the translucent glass
+     panel (see BuilderIdCardApp), which reads light — bg-white/30 over a
+     mostly bright photo — so it needs a dark grey for contrast, not a
+     light one; a near-white attempt here previously washed out. */
+  --bland-muted: #4a4a45;
+  --bland-line: #d9d9d5;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-hh-green: var(--hh-green);
+  --color-hh-green-dark: var(--hh-green-dark);
+  --color-hh-yellow: var(--hh-yellow);
+  --color-hh-pink: var(--hh-pink);
+  --color-hh-cream: var(--hh-cream);
+  --color-bland-bg: var(--bland-bg);
+  --color-bland-fg: var(--bland-fg);
+  --color-bland-muted: var(--bland-muted);
+  --color-bland-line: var(--bland-line);
+  --font-display: var(--font-imbue);
+  --font-label: var(--font-victor-mono);
+  --font-hindi-display: var(--font-martel);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-victor-mono), ui-monospace, monospace;
+}
+
+/* Utility: the "everything is grayscale until you generate a card" state. */
+.bland-scope {
+  filter: grayscale(1) contrast(0.96);
+  transition: filter 900ms ease;
+}
+.bland-scope.is-revealed {
+  filter: grayscale(0) contrast(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bland-scope {
+    transition: filter 200ms linear;
+  }
+}
+
+/* Slow vinyl-style rotation for the music player's album art. */
+@keyframes disc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.disc-spin {
+  animation: disc-spin 7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .disc-spin {
+    animation: none;
+  }
+}
+
+/* Hard on/off terminal-style caret for the countdown's typing animation —
+   deliberately a step function, not a smooth fade, so it reads as a cursor
+   rather than a pulsing glow. */
+@keyframes caret-blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.caret-blink {
+  animation: caret-blink 1s step-end infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .caret-blink {
+    animation: none;
+  }
 }
