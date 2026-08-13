@@ -21,38 +21,108 @@ const VIDEO_ZOOM = 1.34;
 const SKIP_INTRO_SECONDS = 16;
 
 /**
- * Seeks a video element past the intro once its metadata is available, and
- * re-seeks on every loop. Deliberately NOT done via a React
- * `onLoadedMetadata` prop: this is a server-rendered `<video autoPlay>` tag,
- * so the browser can start fetching/decoding it — and fire the native
- * `loadedmetadata` event — straight from the parsed HTML, before React's JS
- * bundle has even hydrated and attached that listener. Miss that one-shot
- * event and the seek never happens. Checking `readyState` directly on mount
- * covers the "already loaded before we got here" case; the listener covers
- * the (usually true on a slow connection) case where it hasn't yet.
+ * ONE video decoder painting BOTH curtain halves.
+ *
+ * The halves used to be two independent `<video>` elements pointed at the
+ * same file. On a local disk they stay close enough to look identical; over
+ * a network they cannot. Each element runs its own fetch, its own buffering,
+ * its own seek to `SKIP_INTRO_SECONDS` and its own decode clock, so the top
+ * and bottom halves end up showing frames from different moments — and
+ * because the two halves are supposed to read as one continuous picture, any
+ * divergence at all is visible as a hard mismatch across the seam. Nothing
+ * short of a shared clock fixes that: syncing `currentTime` between two
+ * elements only narrows the gap, and re-seeking to chase it causes stutter.
+ *
+ * So there is now a single hidden `<video>`, and one rAF loop draws that
+ * element's *current frame* into two canvases in the same tick. Both halves
+ * are the same frame by construction — there is one decoder and one clock,
+ * so they physically cannot drift, on any connection.
+ *
+ * Each canvas is only half-viewport tall but is painted as though it were a
+ * full-viewport box offset by its own position (the same "virtual 100vh"
+ * trick the logo lockup uses), which keeps the seam continuous and costs
+ * exactly one viewport of fill per frame — the same as the old two videos.
  */
-function useSkipIntro(ref: React.RefObject<HTMLVideoElement | null>) {
+function useVideoCurtain(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  topRef: React.RefObject<HTMLCanvasElement | null>,
+  bottomRef: React.RefObject<HTMLCanvasElement | null>
+) {
   useEffect(() => {
-    const video = ref.current;
+    const video = videoRef.current;
     if (!video) return;
+
+    // Not done via a React `onLoadedMetadata` prop: this is a server-rendered
+    // `<video autoPlay>`, so the browser can fire the native event straight
+    // from the parsed HTML, before React has hydrated and attached any
+    // listener. Checking `readyState` covers "already loaded before we got
+    // here"; the listener covers the usual slow-connection case.
     const seekPastIntro = () => {
+      if (video.duration && SKIP_INTRO_SECONDS >= video.duration) return;
       video.currentTime = SKIP_INTRO_SECONDS;
     };
-    if (video.readyState >= 1 /* HAVE_METADATA */) {
-      seekPastIntro();
-    } else {
-      video.addEventListener("loadedmetadata", seekPastIntro, { once: true });
-    }
+    if (video.readyState >= 1 /* HAVE_METADATA */) seekPastIntro();
+    else video.addEventListener("loadedmetadata", seekPastIntro, { once: true });
+
+    // Native `loop` would jump to 0 and replay the intro we just skipped.
     const onEnded = () => {
       seekPastIntro();
       video.play().catch(() => {});
     };
     video.addEventListener("ended", onEnded);
+    video.play().catch(() => {});
+
+    // The source is only ~576px tall, so a full devicePixelRatio backing
+    // store buys no detail — it just multiplies fill cost on retina phones.
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+
+    let raf = 0;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+
+      const fullW = window.innerWidth;
+      const fullH = window.innerHeight;
+      const halfH = fullH / 2;
+
+      // `cover` against the FULL viewport box (not the half), then zoomed to
+      // crop the letterbox bars — identical maths for both halves.
+      const scale = Math.max(fullW / vw, fullH / vh) * VIDEO_ZOOM;
+      const dw = vw * scale;
+      const dh = vh * scale;
+      const dx = (fullW - dw) / 2;
+      const dyBase = (fullH - dh) / 2;
+
+      for (const [ref, offsetY] of [
+        [topRef, 0],
+        [bottomRef, halfH],
+      ] as const) {
+        const canvas = ref.current;
+        if (!canvas) continue;
+        const bw = Math.round(fullW * dpr);
+        const bh = Math.round(halfH * dpr);
+        if (canvas.width !== bw || canvas.height !== bh) {
+          canvas.width = bw;
+          canvas.height = bh;
+        }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // No clear needed: cover-plus-zoom always covers the whole canvas.
+        ctx.drawImage(video, dx, dyBase - offsetY, dw, dh);
+      }
+    };
+    raf = requestAnimationFrame(draw);
+
     return () => {
+      cancelAnimationFrame(raf);
       video.removeEventListener("loadedmetadata", seekPastIntro);
       video.removeEventListener("ended", onEnded);
     };
-  }, [ref]);
+  }, [videoRef, topRef, bottomRef]);
 }
 
 /** Wordmark + neon "गोवा" sign composited on top of it, sized big and dead
@@ -118,15 +188,15 @@ export default function SplashScreen({
    *  the hook AppShell uses to start music playback on a real user gesture. */
   onEnter: () => void;
   /** Fired once the split animation has finished, so AppShell can unmount
-   *  this component (and free the two video decoders) and hand off to the
-   *  main site underneath. */
+   *  this component (and free the video decoder) and hand off to the main
+   *  site underneath. */
   onOpened: () => void;
 }) {
   const [opening, setOpening] = useState(false);
-  const topVideoRef = useRef<HTMLVideoElement>(null);
-  const bottomVideoRef = useRef<HTMLVideoElement>(null);
-  useSkipIntro(topVideoRef);
-  useSkipIntro(bottomVideoRef);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const topCanvasRef = useRef<HTMLCanvasElement>(null);
+  const bottomCanvasRef = useRef<HTMLCanvasElement>(null);
+  useVideoCurtain(videoRef, topCanvasRef, bottomCanvasRef);
 
   const handleEnter = useCallback(() => {
     if (opening) return;
@@ -139,11 +209,34 @@ export default function SplashScreen({
   }, [opening, onEnter, onOpened]);
 
   return (
-    // No background of its own — only the two (opaque, video-filled) half
+    // No background of its own — only the two (opaque, canvas-filled) half
     // panels below are opaque. That's what makes the reveal live instead
     // of a flash of black: the instant a panel slides away, there's
     // nothing painted behind it but the real site.
     <div className="fixed inset-0 z-40 overflow-hidden" aria-hidden={opening}>
+      {/*
+        The single source of truth for both halves. Kept full-size and merely
+        transparent rather than `display:none` or 1×1 — browsers throttle or
+        stop decoding video they consider invisible or offscreen, and this
+        element has to keep producing frames for the canvases to sample.
+      */}
+      <video
+        ref={videoRef}
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0"
+        src="/Prehype.mp4"
+        autoPlay
+        muted
+        loop={false}
+        playsInline
+        preload="auto"
+        aria-hidden="true"
+        // A browser extension (video downloader / media-control style)
+        // commonly stamps its own attribute (e.g. `data-video`) onto <video>
+        // elements before React hydrates, which then trips a false-positive
+        // hydration mismatch — nothing in our own render actually differs.
+        suppressHydrationWarning
+      />
+
       {/* top half */}
       <div
         className={`absolute inset-x-0 top-0 h-1/2 overflow-hidden bg-black transition-transform ease-[cubic-bezier(0.6,0,1,0.4)] ${
@@ -151,21 +244,10 @@ export default function SplashScreen({
         }`}
         style={{ transitionDuration: `${OPEN_MS}ms` }}
       >
-        <video
-          ref={topVideoRef}
-          className="absolute inset-x-0 top-0 h-[100vh] w-full object-cover"
-          style={{ transform: `scale(${VIDEO_ZOOM})` }}
-          src="/Prehype.mp4"
-          autoPlay
-          muted
-          playsInline
-          preload="auto"
-          // A browser extension (video downloader / media-control style)
-          // commonly stamps its own attribute (e.g. `data-video`) onto
-          // <video> elements before React hydrates, which then trips a
-          // false-positive hydration mismatch — nothing in our own
-          // server/client render actually differs.
-          suppressHydrationWarning
+        <canvas
+          ref={topCanvasRef}
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full"
         />
         {/* Same virtual-100vh trick as the lockup: one full-page-height grade
            per half, so the gradient reads as continuous across the seam. */}
@@ -182,16 +264,10 @@ export default function SplashScreen({
         }`}
         style={{ transitionDuration: `${OPEN_MS}ms` }}
       >
-        <video
-          ref={bottomVideoRef}
-          className="absolute inset-x-0 bottom-0 h-[100vh] w-full object-cover"
-          style={{ transform: `scale(${VIDEO_ZOOM})` }}
-          src="/Prehype.mp4"
-          autoPlay
-          muted
-          playsInline
-          preload="auto"
-          suppressHydrationWarning
+        <canvas
+          ref={bottomCanvasRef}
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full"
         />
         <div className="splash-grade pointer-events-none absolute inset-x-0 bottom-0 h-[100vh]" />
         <div className="absolute inset-x-0 bottom-0 flex h-[100vh] items-center justify-center">
