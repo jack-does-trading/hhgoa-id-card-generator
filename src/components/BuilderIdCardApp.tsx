@@ -553,7 +553,7 @@ export default function BuilderIdCardApp() {
               {/* Export size picker. The preview above always stays the card
                  itself — these only change what Download/Share hand you, so
                  choosing a size never costs you the hero image. */}
-              <div className="w-full">
+              <div className="w-full pb-2">
                 <p className="mb-2 text-center text-[11px] tracking-[0.18em] text-bland-muted">
                   EXPORT SIZE
                 </p>
@@ -588,6 +588,20 @@ export default function BuilderIdCardApp() {
                 </div>
               </div>
 
+              {/*
+                Pinned to the bottom of the panel's own scroll box rather than
+                sitting at the end of the flow. The card preview plus the
+                export chips are taller than the panel on a short window, so
+                the two buttons that matter most used to land below the fold —
+                you'd generate a card and its primary actions were off-screen
+                until you scrolled. Sticky keeps them on screen at every
+                viewport, with the card scrolling behind them.
+
+                The negative margins cancel the panel's own padding so the bar
+                spans edge to edge, and the blur keeps it legible over
+                whatever is scrolling underneath.
+              */}
+              <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex w-[calc(100%+2.5rem)] flex-col items-center gap-2 border-t border-white/50 bg-[#f7f7f4]/95 px-5 pb-4 pt-3 backdrop-blur-md sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:w-[calc(100%+3rem)] sm:px-6">
               <div className="flex w-full gap-3">
                 <button
                   type="button"
@@ -611,7 +625,7 @@ export default function BuilderIdCardApp() {
               <button
                 type="button"
                 onClick={handleCopyImage}
-                className="-mt-2 text-xs font-semibold text-bland-muted underline"
+                className="text-xs font-semibold text-bland-muted underline"
               >
                 {copied === "ok"
                   ? "Copied — paste it into the tweet"
@@ -627,6 +641,7 @@ export default function BuilderIdCardApp() {
               >
                 Start over
               </button>
+              </div>
             </div>
           )}
         </div>
