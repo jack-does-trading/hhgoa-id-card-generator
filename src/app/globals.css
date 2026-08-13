@@ -79,6 +79,51 @@ body {
   }
 }
 
+/* Holographic laminate for the card faces. The conic gradient's center and
+   start-angle are bound to CSS custom properties that CardStage rewrites each
+   frame from the pointer position, so the sheen rakes across the card as you
+   move over it. `color-dodge` is what makes it read as light on a foil
+   surface rather than a coloured film laid on top. */
+.card-foil {
+  background: conic-gradient(
+    from var(--fa, 0deg) at var(--fx, 50%) var(--fy, 50%),
+    #ff0080,
+    #fee101,
+    #22e3ff,
+    #ff0080,
+    #fee101,
+    #22e3ff,
+    #ff0080
+  );
+  mix-blend-mode: color-dodge;
+  filter: blur(20px) saturate(1.5);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-foil {
+    display: none;
+  }
+}
+
+/* Splash video grade: pushes the brand-video footage toward the event palette
+   and sinks the bottom of the frame, so the wordmark and CTA sit on something
+   dark enough to read against instead of on raw bright footage. */
+.splash-grade {
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(7, 61, 33, 0.55) 0%,
+      rgba(7, 61, 33, 0.1) 34%,
+      rgba(7, 61, 33, 0.45) 66%,
+      rgba(7, 61, 33, 0.88) 100%
+    ),
+    radial-gradient(
+      ellipse at 50% 46%,
+      rgba(0, 0, 0, 0) 30%,
+      rgba(0, 0, 0, 0.55) 100%
+    );
+}
+
 /* Hard on/off terminal-style caret for the countdown's typing animation —
    deliberately a step function, not a smooth fade, so it reads as a cursor
    rather than a pulsing glow. */

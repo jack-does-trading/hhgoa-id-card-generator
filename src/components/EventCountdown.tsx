@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { daysToGo, daysToGoLabels } from "@/lib/countdown";
+
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+/** Subscribes to the reduced-motion preference as an external store rather
+ *  than reading it inside an effect and calling setState — that pattern
+ *  cascades an extra render on mount, and misses the user changing the
+ *  setting while the tab is open. */
+function subscribeReducedMotion(onChange: () => void) {
+  const mq = window.matchMedia(REDUCED_MOTION);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
 
 const TYPE_MS_PER_CHAR = 45;
 const DELETE_MS_PER_CHAR = 28;
@@ -35,14 +47,14 @@ export default function EventCountdown() {
   // primitive `days` keeps the loop stable across ticks that don't matter.
   const labels = useMemo(() => daysToGoLabels(days), [days]);
 
+  const reduced = useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION).matches,
+    () => false // server: assume motion is fine, the effect never runs there
+  );
+
   useEffect(() => {
-    const reduced = window.matchMedia(
-      "(prefers-reduced-motion: reduce)"
-    ).matches;
-    if (reduced || labels.length <= 1) {
-      setTyped(labels[0] ?? "");
-      return;
-    }
+    if (reduced || labels.length <= 1) return;
 
     let cancelled = false;
     let phraseIndex = 0;
@@ -78,14 +90,16 @@ export default function EventCountdown() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [labels]);
+  }, [labels, reduced]);
 
   return (
     <div
       className="pointer-events-none fixed left-4 top-4 z-50 flex items-center font-sans text-2xl font-black tracking-tighter text-hh-cream [text-shadow:0_2px_14px_rgba(0,0,0,0.65)] sm:left-6 sm:top-6 sm:text-4xl"
       aria-live="off"
     >
-      <span>{typed}</span>
+      {/* Reduced motion gets the full phrase outright — no typing pass, so
+         `typed` is never populated in that mode and would render empty. */}
+      <span>{reduced ? labels[0] ?? "" : typed}</span>
       {/* A slim CSS bar rather than a Unicode block glyph — much finer and
          width-controllable at this font size than "▎" reads as. */}
       <span

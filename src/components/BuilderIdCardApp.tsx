@@ -3,12 +3,25 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import PhotoCropper, { PhotoCropperHandle } from "./PhotoCropper";
 import BeachBackdrop from "./BeachBackdrop";
+import CardStage from "./CardStage";
 import { toDisplayableImage } from "@/lib/heic";
-import { generateBuilderTitle } from "@/lib/builderTitle";
+import { generateBuilderTitle, titleForIdentity } from "@/lib/builderTitle";
 import { generateBuilderId } from "@/lib/builderId";
-import { renderIdCard, canvasToBlob, CARD_WIDTH, COLORS } from "@/lib/generateCard";
-import { applyPaintedMode } from "@/lib/paintedMode";
+import {
+  renderIdCard,
+  renderIdCardBack,
+  canvasToBlob,
+  COLORS,
+  type CardData,
+} from "@/lib/generateCard";
+import {
+  renderShareFormat,
+  FORMAT_META,
+  type ShareFormat,
+} from "@/lib/shareFormats";
 import { renderQrCanvas } from "@/lib/qr";
+import { daysToGo } from "@/lib/countdown";
+import { sfxShutter, sfxStamp, sfxTick } from "@/lib/sfx";
 
 type Stage = "upload" | "edit" | "processing" | "result";
 
@@ -30,6 +43,23 @@ const PROCESSING_LABELS = [
 // actually triggers. One is picked per visit (see `generateLabel` below) so
 // it stays put while the user is filling in the form, not swapping label
 // under their cursor.
+// The गोवा brand mark, fetched once per session and reused for every render.
+// Resolves to `undefined` rather than rejecting if it can't be fetched — the
+// wordmark has a text fallback, and a missing decorative asset should never
+// be the reason card generation fails.
+let goaMarkPromise: Promise<HTMLImageElement | undefined> | null = null;
+function loadGoaMark(): Promise<HTMLImageElement | undefined> {
+  if (!goaMarkPromise) {
+    goaMarkPromise = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(undefined);
+      img.src = "/brand/goa-hindi.svg";
+    });
+  }
+  return goaMarkPromise;
+}
+
 const GENERATE_LABELS = [
   "🎨 Bring the colors",
   "🌈 Splash on some color",
@@ -43,19 +73,60 @@ export default function BuilderIdCardApp() {
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
-  const [builderTitle, setBuilderTitle] = useState(() => generateBuilderTitle());
+  // The title is DERIVED from name + stack, not rolled. Same person always
+  // gets the same title, so the card reads as a verdict about you rather than
+  // a slot-machine pull — which is also what makes two people comparing cards
+  // interesting. `rerolledTitle` is the explicit opt-out.
+  const [rerolledTitle, setRerolledTitle] = useState<string | null>(null);
+  const builderTitle = rerolledTitle ?? titleForIdentity(name, role);
+
   const [builderId, setBuilderId] = useState(() => generateBuilderId());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [processingLabel, setProcessingLabel] = useState(PROCESSING_LABELS[0]);
 
   const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
+  const [backUrl, setBackUrl] = useState<string | null>(null);
+  const [format, setFormat] = useState<ShareFormat>("feed");
+  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+  // Populated in the background right after generation so the share click
+  // never has to wait on a network round trip.
+  const shareUrlRef = useRef<string | null>(null);
   const [generateLabel] = useState(
     () => GENERATE_LABELS[Math.floor(Math.random() * GENERATE_LABELS.length)]
   );
   const resultCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cardDataRef = useRef<CardData | null>(null);
   const cropperRef = useRef<PhotoCropperHandle>(null);
+
+  /** Re-composes the card into whichever aspect ratio is currently selected.
+   *  Cheap enough (one drawImage onto a fresh canvas) to do per export rather
+   *  than pre-rendering all four up front. */
+  /** Uploads the card in the background so `/r/[id]` (and therefore the
+   *  link preview's og:image) exists before anyone asks for it. Failure is
+   *  silent and expected — with no Blob store configured the share simply
+   *  goes out as text. */
+  const uploadForShare = useCallback(async (card: HTMLCanvasElement) => {
+    try {
+      const res = await fetch("/api/upload-card", {
+        method: "POST",
+        headers: { "Content-Type": "image/png" },
+        body: await canvasToBlob(card),
+      });
+      if (!res.ok) return;
+      const { id } = (await res.json()) as { id: string };
+      shareUrlRef.current = `${window.location.origin}/r/${id}`;
+    } catch {
+      // storage not configured / offline — text-only share is the fallback
+    }
+  }, []);
+
+  const exportCanvas = useCallback((fmt: ShareFormat) => {
+    const card = resultCanvasRef.current;
+    const data = cardDataRef.current;
+    if (!card || !data) return null;
+    return renderShareFormat(fmt, card, data);
+  }, []);
 
   // Trimmed from 320 — every pixel of the edit stage's height budget counts
   // now that the panel is meant to fit one screen with no scrolling.
@@ -84,6 +155,7 @@ export default function BuilderIdCardApp() {
     if (!cropperRef.current) return;
     setError(null);
     setStage("processing");
+    sfxShutter();
 
     const prefersReducedMotion =
       typeof window !== "undefined" &&
@@ -100,12 +172,11 @@ export default function BuilderIdCardApp() {
     }
 
     try {
-      const rawPhoto = cropperRef.current.getCroppedCanvas(760);
-      if (!rawPhoto) throw new Error("No photo cropped");
-
-      // "Painted Mode": fake, instant, client-side art-style pass — see
-      // lib/paintedMode.ts for why this replaces a real AI style-transfer call.
-      const paintedPhoto = applyPaintedMode(rawPhoto);
+      // Used exactly as cropped — no style pass, no posterise, no warmth
+      // push, no grain. Every stylised element on this card is drawn *around*
+      // the portrait; the person's own face is the one thing left untouched.
+      const photo = cropperRef.current.getCroppedCanvas(760);
+      if (!photo) throw new Error("No photo cropped");
 
       // Points at the site root rather than this specific card's own share
       // page — a genuinely per-card QR would need the finished card
@@ -114,21 +185,31 @@ export default function BuilderIdCardApp() {
       // which means either a chicken-and-egg render twice, or making
       // "Generate" itself wait on a network round trip it never needed
       // before. Punting on that trade-off for now — flagged to the user.
-      const qr = await renderQrCanvas(
-        window.location.origin,
-        240,
-        COLORS.greenDark,
-        COLORS.cream
-      ).catch(() => undefined);
+      // Rendered at 640 now that the QR is the hero of the card's back rather
+      // than a 78px afterthought in the front's corner.
+      const [qr, goaMark] = await Promise.all([
+        renderQrCanvas(
+          window.location.origin,
+          640,
+          COLORS.greenDark,
+          COLORS.cream
+        ).catch(() => undefined),
+        loadGoaMark(),
+      ]);
 
-      const card = renderIdCard({
+      const cardData: CardData = {
         name: name.trim(),
         role: role.trim(),
         builderTitle,
         builderId,
-        photo: paintedPhoto,
+        photo,
+        daysToGo: daysToGo(),
         qr,
-      });
+        goaMark,
+      };
+
+      const card = renderIdCard(cardData);
+      const cardBack = renderIdCardBack(cardData);
 
       // Small deliberate pause so the reveal reads as a beat, not a jump cut —
       // capped well under the "few seconds, not a loading screen" budget, and
@@ -138,8 +219,15 @@ export default function BuilderIdCardApp() {
       }
 
       resultCanvasRef.current = card;
+      cardDataRef.current = cardData;
       setResultUrl(card.toDataURL("image/png"));
+      setBackUrl(cardBack.toDataURL("image/png"));
       setStage("result");
+      sfxStamp();
+
+      // Fire-and-forget: gets the share URL ready while the user is still
+      // looking at their card, so clicking "Share to X" is instant.
+      void uploadForShare(card);
     } catch (err) {
       console.error(err);
       setError("Something went wrong generating the card — try again.");
@@ -147,96 +235,76 @@ export default function BuilderIdCardApp() {
     } finally {
       if (labelTimer) clearInterval(labelTimer);
     }
-  }, [name, role, builderTitle, builderId]);
+  }, [name, role, builderTitle, builderId, uploadForShare]);
 
   const handleDownload = useCallback(async () => {
-    if (!resultCanvasRef.current) return;
-    const blob = await canvasToBlob(resultCanvasRef.current);
+    const canvas = exportCanvas(format);
+    if (!canvas) return;
+    sfxTick();
+    const blob = await canvasToBlob(canvas);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `hh-goa-2026-builder-id-${(name || "builder")
+    a.download = `hh-goa-2026-${format}-${(name || "builder")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")}.png`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [name]);
+  }, [name, format, exportCanvas]);
 
-  const handleShare = useCallback(async () => {
-    if (!resultCanvasRef.current) return;
-
-    // Open the tab *synchronously*, right here in the click handler — this
-    // is the fix for "Share feels slow": browsers only let window.open()
-    // through without popup-blocking (or queuing) it while the call stack
-    // still traces back to a real user gesture, and that's gone the moment
-    // we `await` anything below. Opening a blank tab now and navigating it
-    // once the upload resolves means the tab appears instantly instead of
-    // however long the upload takes.
-    const shareWindow = window.open("about:blank", "_blank");
-    setSharing(true);
-
-    try {
-      const blob = await canvasToBlob(resultCanvasRef.current);
-
-      // Always go straight to the X web-intent compose window — no
-      // `navigator.share()` here, since on macOS/iOS that opens the native
-      // OS share sheet (AirDrop/Mail/Messages/…) instead of X specifically,
-      // which isn't what "Share to 𝕏" should do.
-      //
-      // Upload the card so we have a public URL, then point the intent's
-      // `url` at our /r/[id] page — its og:image resolves to that upload,
-      // so the link preview shows the actual card instead of a blank/
-      // default thumbnail. Capped at 4s so a slow/hung upload can't stall
-      // the tab that's already open and waiting — worst case the tweet
-      // just goes out without the image-preview link.
-      let shareUrl: string | null = null;
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
-        const res = await fetch("/api/upload-card", {
-          method: "POST",
-          headers: { "Content-Type": "image/png" },
-          body: blob,
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (res.ok) {
-          const { id } = (await res.json()) as { id: string };
-          shareUrl = `${window.location.origin}/r/${id}`;
-        }
-      } catch {
-        // storage not configured / offline / timed out — fall back to
-        // text-only below
-      }
-
-      const params = new URLSearchParams({ text: SHARE_TEXT });
-      if (shareUrl) params.set("url", shareUrl);
-      const intentUrl = `https://twitter.com/intent/tweet?${params.toString()}`;
-
-      if (shareWindow) {
-        // Sever the opener link while we're still same-origin (about:blank)
-        // — keeps the reverse-tabnabbing risk of holding onto the reference
-        // off the table before navigating it to a cross-origin URL.
-        try {
-          shareWindow.opener = null;
-        } catch {
-          // ignore — best-effort hardening, not load-bearing
-        }
-        shareWindow.location.href = intentUrl;
-      } else {
-        // Popup blocked despite the synchronous open (rare) — last resort.
-        window.open(intentUrl, "_blank", "noopener,noreferrer");
-      }
-    } finally {
-      setSharing(false);
-    }
+  /**
+   * Straight to the X composer, synchronously, with zero awaits in the way.
+   *
+   * Everything slow was moved off this path: the card is uploaded in the
+   * background the moment it's generated (see `uploadForShare`), so by the
+   * time anyone clicks this the share URL is usually already sitting in
+   * `shareUrlRef` — and if it isn't, the tweet just goes out without the
+   * link preview rather than making the user wait for it. Copying the image
+   * to the clipboard used to happen here too, but that prompts for
+   * permission in some browsers, which stalled the one thing this button is
+   * supposed to do. It's its own button now.
+   */
+  const handleShare = useCallback(() => {
+    sfxTick();
+    const params = new URLSearchParams({ text: SHARE_TEXT });
+    if (shareUrlRef.current) params.set("url", shareUrlRef.current);
+    window.open(
+      `https://twitter.com/intent/tweet?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
   }, []);
+
+  /** Explicit, opt-in clipboard copy — X's web intent has no media
+   *  parameter, so pasting is the only way to attach the actual image. */
+  const handleCopyImage = useCallback(async () => {
+    const canvas = exportCanvas(format);
+    if (!canvas) return;
+    try {
+      // Handed the *promise* rather than an awaited blob: Safari requires
+      // the write to be issued in the same task as the gesture and resolves
+      // it itself. Chrome accepts both forms.
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": canvasToBlob(canvas) }),
+      ]);
+      setCopied("ok");
+      sfxTick();
+    } catch {
+      setCopied("fail");
+    }
+    window.setTimeout(() => setCopied(null), 2600);
+  }, [format, exportCanvas]);
 
   const reset = useCallback(() => {
     setStage("upload");
     setPhotoBlob(null);
     setResultUrl(null);
+    setBackUrl(null);
+    setFormat("feed");
+    setCopied(null);
+    shareUrlRef.current = null;
     resultCanvasRef.current = null;
+    cardDataRef.current = null;
     setBuilderId(generateBuilderId());
   }, []);
 
@@ -352,17 +420,25 @@ export default function BuilderIdCardApp() {
                   />
                 </label>
                 <div className="flex flex-col gap-1 text-sm sm:col-span-2">
-                  <span className="text-bland-muted">Builder title</span>
+                  <span className="text-bland-muted">
+                    Builder title{" "}
+                    <span className="text-[11px] opacity-70">
+                      {rerolledTitle ? "· rerolled" : "· derived from your name + stack"}
+                    </span>
+                  </span>
                   <div className="flex items-center gap-2">
                     <span className="flex-1 rounded-lg border border-bland-line bg-white px-3 py-2">
                       {builderTitle}
                     </span>
                     <button
                       type="button"
-                      onClick={() => setBuilderTitle(generateBuilderTitle())}
+                      onClick={() => {
+                        setRerolledTitle(generateBuilderTitle());
+                        sfxTick();
+                      }}
                       className="rounded-lg border border-bland-line px-3 py-2 text-xs font-semibold hover:border-hh-green"
                     >
-                      🎲 Reroll
+                      Reroll
                     </button>
                   </div>
                 </div>
@@ -398,20 +474,54 @@ export default function BuilderIdCardApp() {
             </div>
           )}
 
-          {stage === "result" && resultUrl && (
-            <div className="mt-6 flex flex-col items-center gap-5">
-              <div className="w-full max-w-[320px] overflow-hidden rounded-2xl shadow-xl">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={resultUrl}
+          {stage === "result" && resultUrl && backUrl && (
+            <div className="mt-2 flex flex-col items-center gap-5">
+              <div className="w-full max-w-[300px]">
+                <CardStage
+                  front={resultUrl}
+                  back={backUrl}
                   alt="Your HH Goa 2026 Builder ID Card"
-                  width={CARD_WIDTH}
-                  className="w-full"
                 />
               </div>
-              <p className="-mt-3 font-[family-name:var(--font-label)] text-xs tracking-[0.2em] text-bland-muted">
-                BUILDER ID · {builderId}
-              </p>
+
+              {/* Export size picker. The preview above always stays the card
+                 itself — these only change what Download/Share hand you, so
+                 choosing a size never costs you the hero image. */}
+              <div className="w-full">
+                <p className="mb-2 text-center text-[11px] tracking-[0.18em] text-bland-muted">
+                  EXPORT SIZE
+                </p>
+                <div className="grid grid-cols-4 gap-2">
+                  {(Object.keys(FORMAT_META) as ShareFormat[]).map((key) => {
+                    const meta = FORMAT_META[key];
+                    const active = key === format;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => {
+                          setFormat(key);
+                          sfxTick();
+                        }}
+                        className={`rounded-xl border px-2 py-2 text-center transition ${
+                          active
+                            ? "border-hh-green bg-hh-green text-hh-yellow"
+                            : "border-bland-line bg-white/70 text-bland-fg hover:border-hh-green"
+                        }`}
+                      >
+                        <span className="block text-xs font-bold">
+                          {meta.label}
+                        </span>
+                        <span className="block text-[9px] opacity-70">
+                          {meta.hint.split(" · ")[0]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex w-full gap-3">
                 <button
                   type="button"
@@ -423,12 +533,27 @@ export default function BuilderIdCardApp() {
                 <button
                   type="button"
                   onClick={handleShare}
-                  disabled={sharing}
-                  className="flex-1 rounded-full bg-hh-pink px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+                  className="flex-1 rounded-full bg-hh-pink px-4 py-3 text-sm font-bold text-white"
                 >
-                  {sharing ? "Preparing…" : "Share to 𝕏"}
+                  Share to 𝕏
                 </button>
               </div>
+
+              {/* Separate from Share on purpose: the clipboard API can prompt
+                 for permission, and that prompt sitting in front of the
+                 composer is exactly what made sharing feel stuck. */}
+              <button
+                type="button"
+                onClick={handleCopyImage}
+                className="-mt-2 text-xs font-semibold text-bland-muted underline"
+              >
+                {copied === "ok"
+                  ? "Copied — paste it into the tweet"
+                  : copied === "fail"
+                    ? "Couldn't copy — use Download instead"
+                    : "Copy card image"}
+              </button>
+
               <button
                 type="button"
                 onClick={reset}

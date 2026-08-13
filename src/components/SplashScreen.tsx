@@ -68,14 +68,17 @@ function SplashLockup({ onEnter }: { onEnter: () => void }) {
           alt="Hacker House"
           className="w-[78vw] max-w-[760px] drop-shadow-[0_6px_26px_rgba(0,0,0,0.6)] sm:w-[52vw]"
         />
-        {/* The neon "गोवा" sign, inset dead-center over the wordmark —
-           layered glow (pink stroke + yellow fill, matching the mark's own
-           colors) stands in for an actual neon-tube bloom. */}
+        {/* The neon "गोवा" sign. Deliberately NOT dead-center: the wordmark's
+           geometric middle lands on the R/H letterforms, so centering it there
+           had the sticker colliding with two stems. Slapped low-right over the
+           baseline instead, where it sits in actual negative space and reads
+           as an applied sticker. Layered glow (yellow core + pink bloom,
+           matching the mark) stands in for a real neon-tube halo. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/brand/goa-hindi.svg"
           alt="गोवा"
-          className="absolute w-[7vw] max-w-[85px] [filter:drop-shadow(0_0_14px_#fee101)_drop-shadow(0_0_26px_#ff0080)] sm:w-[6vw]"
+          className="absolute bottom-full right-[7%] -mb-3 w-[9vw] max-w-[104px] -rotate-6 [filter:drop-shadow(0_0_14px_#fee101)_drop-shadow(0_0_26px_#ff0080)] sm:w-[7vw]"
         />
       </div>
       <button
@@ -164,6 +167,9 @@ export default function SplashScreen({
           // server/client render actually differs.
           suppressHydrationWarning
         />
+        {/* Same virtual-100vh trick as the lockup: one full-page-height grade
+           per half, so the gradient reads as continuous across the seam. */}
+        <div className="splash-grade pointer-events-none absolute inset-x-0 top-0 h-[100vh]" />
         <div className="absolute inset-x-0 top-0 flex h-[100vh] items-center justify-center">
           <SplashLockup onEnter={handleEnter} />
         </div>
@@ -187,6 +193,7 @@ export default function SplashScreen({
           preload="auto"
           suppressHydrationWarning
         />
+        <div className="splash-grade pointer-events-none absolute inset-x-0 bottom-0 h-[100vh]" />
         <div className="absolute inset-x-0 bottom-0 flex h-[100vh] items-center justify-center">
           <SplashLockup onEnter={handleEnter} />
         </div>

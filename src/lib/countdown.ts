@@ -13,15 +13,18 @@ export function daysToGo(now: Date = new Date()): number {
  *  (event day / already live) only get one phrasing each — cycling
  *  "It's today" against reworded variants of itself isn't worth it. */
 export function daysToGoLabels(days: number): string[] {
+  // All three sit in the same register — a countdown, phrased three ways —
+  // rather than mixing a fact, a joke and a studio credit, which read as
+  // three different voices talking over each other.
   if (days > 1) {
     return [
       `${days} days to go`,
-      `Don't forget your sunscreen`,
-      `2:47PM Studio`,
+      `${days} days until sunscreen needed`,
+      `${days} days until Goa`,
     ];
   }
   if (days === 1) {
-    return ["1 day to go", "1 day remaining", "See you tomorrow"];
+    return ["1 day to go", "1 last sunset", "See you tomorrow"];
   }
   if (days === 0) return ["It's today 🎉"];
   return ["HH Goa is live 🌴"];

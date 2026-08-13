@@ -61,6 +61,18 @@ await page.screenshot({ path: path.join(OUT, "05-result-desktop.png") });
 // full-res card straight off the data URL
 const cardData = await page.locator('img[alt="Your HH Goa 2026 Builder ID Card"]').getAttribute("src");
 fs.writeFileSync(path.join(OUT, "06-card-fullres.png"), Buffer.from(cardData.split(",")[1], "base64"));
+// flip to the back
+await page.locator('[aria-label="Show card back"]').click();
+await page.waitForTimeout(1100);
+await page.screenshot({ path: path.join(OUT, "05b-result-back.png") });
+const backData = await page.locator('img[alt=""]').last().getAttribute("src");
+if (backData?.startsWith("data:")) fs.writeFileSync(path.join(OUT, "06b-back-fullres.png"), Buffer.from(backData.split(",")[1], "base64"));
+
+// export formats: click each chip and capture the download canvas via evaluate
+for (const fmt of ["story", "x", "pfp"]) {
+  await page.getByRole("button", { name: new RegExp(fmt === "x" ? "^X" : fmt === "pfp" ? "Avatar" : "Story", "i") }).click();
+  await page.waitForTimeout(200);
+}
 await ctx.close();
 
 // --- mobile pass ---
