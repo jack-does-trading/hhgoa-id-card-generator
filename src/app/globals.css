@@ -139,6 +139,28 @@ body {
   }
 }
 
+/* The generator panel is the one thing allowed to scroll on an otherwise
+   locked viewport, so its scrollbar has to look deliberate rather than like a
+   stray OS widget bolted onto the glass. Thin, brand green, transparent
+   track. */
+.panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(11, 104, 57, 0.4) transparent;
+}
+.panel-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(11, 104, 57, 0.32);
+  border-radius: 999px;
+}
+.panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(11, 104, 57, 0.55);
+}
+
 /* Hard on/off terminal-style caret for the countdown's typing animation —
    deliberately a step function, not a smooth fade, so it reads as a cursor
    rather than a pulsing glow. */

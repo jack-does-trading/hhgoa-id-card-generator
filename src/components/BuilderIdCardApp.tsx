@@ -341,7 +341,7 @@ export default function BuilderIdCardApp() {
         generator lives in that strip while the "हैकर हाउस" board on the
         left of the backdrop stays uncovered as the hero.
       */}
-      <div className="relative z-10 flex flex-1 items-start justify-center px-4 py-10 sm:w-2/5 sm:items-center sm:justify-center sm:self-end sm:px-8 sm:py-6">
+      <div className="relative z-10 flex min-h-0 flex-1 items-start justify-center px-4 py-10 sm:w-2/5 sm:items-center sm:justify-center sm:self-end sm:px-8 sm:py-6 2xl:w-1/2">
         {/*
           Glass tile: translucent, blurred, floating over the photo backdrop
           rather than a solid card. Deliberately carries no `.bland-scope`
@@ -357,7 +357,7 @@ export default function BuilderIdCardApp() {
           short enough to fit a single (locked, non-scrolling) screen.
         */}
         <div
-          className="max-h-full w-full max-w-md overflow-y-auto rounded-3xl border border-white/40 bg-white/30 p-5 shadow-2xl backdrop-blur-md sm:max-w-none sm:p-6"
+          className="panel-scroll max-h-full w-full max-w-md overflow-y-auto rounded-3xl border border-white/40 bg-white/30 p-5 shadow-2xl backdrop-blur-md sm:max-w-none sm:p-6"
         >
           <header className="text-center">
             <p className="text-xs tracking-[0.3em] text-bland-muted">
@@ -402,8 +402,8 @@ export default function BuilderIdCardApp() {
           )}
 
           {stage === "edit" && cropperEl && (
-            <div className="mt-4 flex flex-col items-center gap-4">
-              {cropperEl}
+            <div className="mt-4 flex flex-col items-center gap-4 2xl:flex-row 2xl:items-start 2xl:gap-6">
+              <div className="shrink-0">{cropperEl}</div>
 
               {/*
                 Name/role go two-up from `sm:` (the panel has the width for
@@ -416,7 +416,15 @@ export default function BuilderIdCardApp() {
                 Generate button got pushed off the right edge of the
                 viewport entirely.
               */}
-              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+              {/*
+                  Becomes a flex column at 2xl rather than a 1-column grid:
+                  overriding `grid-template-columns` across breakpoints proved
+                  unreliable here and left a collapsed 0px first column, so this
+                  switches `display` instead, which makes the grid track sizing
+                  irrelevant outright. The `col-span-2` classes below become
+                  no-ops in flex, which is exactly what is wanted.
+                */}
+                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 2xl:flex 2xl:w-auto 2xl:min-w-0 2xl:flex-1 2xl:flex-col">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-bland-muted">
                     Name <span className="text-hh-pink">*</span>
