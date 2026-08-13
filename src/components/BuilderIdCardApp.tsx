@@ -89,6 +89,9 @@ export default function BuilderIdCardApp() {
   const [backUrl, setBackUrl] = useState<string | null>(null);
   const [format, setFormat] = useState<ShareFormat>("feed");
   const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
+  // Errors only appear once Generate has been pressed — nobody wants a form
+  // scolding them about fields they haven't reached yet.
+  const [showErrors, setShowErrors] = useState(false);
   // Populated in the background right after generation so the share click
   // never has to wait on a network round trip.
   const shareUrlRef = useRef<string | null>(null);
@@ -131,6 +134,7 @@ export default function BuilderIdCardApp() {
   // Trimmed from 320 — every pixel of the edit stage's height budget counts
   // now that the panel is meant to fit one screen with no scrolling.
   const cropSize = 260;
+  const isComplete = name.trim().length > 0 && role.trim().length > 0;
   const revealed = stage === "result";
 
   const onFileChosen = useCallback(async (file: File | null) => {
@@ -153,6 +157,19 @@ export default function BuilderIdCardApp() {
 
   const handleGenerate = useCallback(async () => {
     if (!cropperRef.current) return;
+
+    // Name and stack are what make the card *someone's*. A card printed
+    // "YOUR NAME HERE" is worse than no card, so this is a hard gate rather
+    // than a placeholder fallback.
+    if (!name.trim() || !role.trim()) {
+      setShowErrors(true);
+      const selector = !name.trim()
+        ? 'input[placeholder="e.g. Priya Shenoy"]'
+        : 'input[placeholder="e.g. Full-stack, ex-Rust, no-sleep"]';
+      document.querySelector<HTMLInputElement>(selector)?.focus();
+      return;
+    }
+
     setError(null);
     setStage("processing");
     sfxShutter();
@@ -302,6 +319,7 @@ export default function BuilderIdCardApp() {
     setBackUrl(null);
     setFormat("feed");
     setCopied(null);
+    setShowErrors(false);
     shareUrlRef.current = null;
     resultCanvasRef.current = null;
     cardDataRef.current = null;
@@ -400,21 +418,39 @@ export default function BuilderIdCardApp() {
               */}
               <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-bland-muted">Name</span>
+                  <span className="text-bland-muted">
+                    Name <span className="text-hh-pink">*</span>
+                  </span>
                   <input
-                    className="rounded-lg border border-bland-line bg-white px-3 py-2 outline-none focus:border-hh-green"
+                    className={`rounded-lg border bg-white px-3 py-2 outline-none focus:border-hh-green ${
+                      showErrors && !name.trim()
+                        ? "border-hh-pink"
+                        : "border-bland-line"
+                    }`}
                     value={name}
                     maxLength={40}
+                    required
+                    aria-required="true"
+                    aria-invalid={showErrors && !name.trim()}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Priya Shenoy"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-bland-muted">Stack / role</span>
+                  <span className="text-bland-muted">
+                    Stack / role <span className="text-hh-pink">*</span>
+                  </span>
                   <input
-                    className="rounded-lg border border-bland-line bg-white px-3 py-2 outline-none focus:border-hh-green"
+                    className={`rounded-lg border bg-white px-3 py-2 outline-none focus:border-hh-green ${
+                      showErrors && !role.trim()
+                        ? "border-hh-pink"
+                        : "border-bland-line"
+                    }`}
                     value={role}
                     maxLength={40}
+                    required
+                    aria-required="true"
+                    aria-invalid={showErrors && !role.trim()}
                     onChange={(e) => setRole(e.target.value)}
                     placeholder="e.g. Full-stack, ex-Rust, no-sleep"
                   />
@@ -451,16 +487,38 @@ export default function BuilderIdCardApp() {
                   >
                     Back
                   </button>
+                  {/*
+                    Left enabled when the fields are empty, rather than
+                    disabled: a dead button gives no reason for being dead.
+                    Clicking it surfaces which field is missing and focuses it.
+                  */}
                   <button
                     type="button"
                     disabled={busy}
                     onClick={handleGenerate}
                     aria-label="Generate card"
-                    className="flex-1 rounded-full bg-hh-green px-4 py-3 text-sm font-bold text-hh-yellow disabled:opacity-60"
+                    className={`flex-1 rounded-full px-4 py-3 text-sm font-bold disabled:opacity-60 ${
+                      isComplete
+                        ? "bg-hh-green text-hh-yellow"
+                        : "bg-hh-green/45 text-hh-yellow/80"
+                    }`}
                   >
                     {busy ? "…" : generateLabel}
                   </button>
                 </div>
+
+                {showErrors && !isComplete && (
+                  <p
+                    role="alert"
+                    className="text-center text-xs font-semibold text-hh-pink sm:col-span-2"
+                  >
+                    {!name.trim() && !role.trim()
+                      ? "Add your name and your stack to get on the list."
+                      : !name.trim()
+                        ? "Your card needs a name on it."
+                        : "Add your stack — it goes on the front of the card."}
+                  </p>
+                )}
               </div>
             </div>
           )}
