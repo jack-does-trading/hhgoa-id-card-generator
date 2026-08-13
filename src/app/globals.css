@@ -124,6 +124,21 @@ body {
     );
 }
 
+/* The floating player animates between two very different layouts — a wide
+   pill centred at the bottom, and a 68px puck in the bottom-left corner — so
+   position, width and transform all have to interpolate together. Easing is a
+   soft overshoot-free ease-out so the puck settles rather than snapping. */
+.music-dock {
+  transition-property: left, right, top, bottom, width, transform;
+  transition-duration: 620ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .music-dock {
+    transition-duration: 1ms;
+  }
+}
+
 /* Hard on/off terminal-style caret for the countdown's typing animation —
    deliberately a step function, not a smooth fade, so it reads as a cursor
    rather than a pulsing glow. */
@@ -138,8 +153,8 @@ body {
 .caret-blink {
   animation: caret-blink 1s step-end infinite;
 }
-@media (prefers-reduced-motion: reduce) {
-  .caret-blink {
-    animation: none;
-  }
-}
+/* Deliberately NOT disabled under prefers-reduced-motion. A 1Hz opacity step
+   is not vestibular motion and is far below any photosensitivity threshold
+   (which starts around 3Hz), and with the typing animation already suppressed
+   this blink is the only thing left telling the user the corner is live
+   rather than frozen. */

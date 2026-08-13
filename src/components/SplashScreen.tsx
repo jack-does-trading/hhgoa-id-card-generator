@@ -67,10 +67,41 @@ function useVideoCurtain(
     // Native `loop` would jump to 0 and replay the intro we just skipped.
     const onEnded = () => {
       seekPastIntro();
-      video.play().catch(() => {});
+      void tryPlay();
     };
+
+    // A single `play()` on mount is not enough. WebKit evaluates the muted-
+    // autoplay allowance against element state at the moment of the call and
+    // rejects outright if it isn't satisfied yet, and iOS additionally blocks
+    // all autoplay in Low Power Mode. Swallowing that one rejection left the
+    // splash frozen on a single frame forever. So: retry on every signal that
+    // could plausibly change the answer, and fall back to the first touch
+    // anywhere on the page, which always carries a user-gesture grant.
+    let lastAttempt = 0;
+    let attempting = false;
+    const tryPlay = async () => {
+      if (attempting || !video.paused) return;
+      attempting = true;
+      lastAttempt = performance.now();
+      try {
+        await video.play();
+      } catch {
+        // still blocked — the rAF loop below will keep trying
+      } finally {
+        attempting = false;
+      }
+    };
+
+    const onFirstInteraction = () => void tryPlay();
+
     video.addEventListener("ended", onEnded);
-    video.play().catch(() => {});
+    video.addEventListener("loadedmetadata", tryPlay);
+    video.addEventListener("loadeddata", tryPlay);
+    video.addEventListener("canplay", tryPlay);
+    document.addEventListener("visibilitychange", tryPlay);
+    window.addEventListener("pointerdown", onFirstInteraction, { capture: true });
+    window.addEventListener("touchstart", onFirstInteraction, { capture: true, passive: true });
+    void tryPlay();
 
     // The source is only ~576px tall, so a full devicePixelRatio backing
     // store buys no detail — it just multiplies fill cost on retina phones.
@@ -79,6 +110,15 @@ function useVideoCurtain(
     let raf = 0;
     const draw = () => {
       raf = requestAnimationFrame(draw);
+
+      // The event triggers above all fire within the first moments of load;
+      // if the autoplay allowance isn't granted yet they are all rejected and
+      // nothing ever asks again, which is precisely how the splash ended up
+      // frozen on one frame. Re-asking from the loop that is already running
+      // costs nothing and covers every reason playback might stop — the
+      // allowance arriving late, Low Power Mode, or the system pausing us on
+      // a phone call — without a dedicated timer.
+      if (video.paused && performance.now() - lastAttempt > 500) void tryPlay();
 
       const vw = video.videoWidth;
       const vh = video.videoHeight;
@@ -121,6 +161,12 @@ function useVideoCurtain(
       cancelAnimationFrame(raf);
       video.removeEventListener("loadedmetadata", seekPastIntro);
       video.removeEventListener("ended", onEnded);
+      video.removeEventListener("loadedmetadata", tryPlay);
+      video.removeEventListener("loadeddata", tryPlay);
+      video.removeEventListener("canplay", tryPlay);
+      document.removeEventListener("visibilitychange", tryPlay);
+      window.removeEventListener("pointerdown", onFirstInteraction, { capture: true });
+      window.removeEventListener("touchstart", onFirstInteraction, { capture: true });
     };
   }, [videoRef, topRef, bottomRef]);
 }
@@ -214,29 +260,6 @@ export default function SplashScreen({
     // of a flash of black: the instant a panel slides away, there's
     // nothing painted behind it but the real site.
     <div className="fixed inset-0 z-40 overflow-hidden" aria-hidden={opening}>
-      {/*
-        The single source of truth for both halves. Kept full-size and merely
-        transparent rather than `display:none` or 1×1 — browsers throttle or
-        stop decoding video they consider invisible or offscreen, and this
-        element has to keep producing frames for the canvases to sample.
-      */}
-      <video
-        ref={videoRef}
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0"
-        src="/Prehype.mp4"
-        autoPlay
-        muted
-        loop={false}
-        playsInline
-        preload="auto"
-        aria-hidden="true"
-        // A browser extension (video downloader / media-control style)
-        // commonly stamps its own attribute (e.g. `data-video`) onto <video>
-        // elements before React hydrates, which then trips a false-positive
-        // hydration mismatch — nothing in our own render actually differs.
-        suppressHydrationWarning
-      />
-
       {/* top half */}
       <div
         className={`absolute inset-x-0 top-0 h-1/2 overflow-hidden bg-black transition-transform ease-[cubic-bezier(0.6,0,1,0.4)] ${
@@ -244,6 +267,38 @@ export default function SplashScreen({
         }`}
         style={{ transitionDuration: `${OPEN_MS}ms` }}
       >
+        {/*
+          The single decoder feeding BOTH halves' canvases.
+
+          It lives here, inside the top half, rather than as a transparent
+          element in the outer container. WebKit only grants muted autoplay to
+          a *visible* element — `opacity: 0` gets the play() promise rejected
+          outright, which left the whole splash frozen on one frame on iOS. So
+          it is fully opaque and simply painted over by the canvas below,
+          which is opaque by construction (cover-plus-zoom always fills it).
+
+          Being inside this wrapper also means it travels with the top half
+          when the curtain opens, instead of being left behind uncovered. And
+          it carries the exact styling the old top-half video had, so on the
+          first frame before the canvas has painted — or if canvas ever fails
+          outright — what shows through is indistinguishable.
+        */}
+        <video
+          ref={videoRef}
+          className="pointer-events-none absolute inset-x-0 top-0 h-[100vh] w-full object-cover"
+          style={{ transform: `scale(${VIDEO_ZOOM})` }}
+          src="/Prehype.mp4"
+          autoPlay
+          muted
+          playsInline
+          preload="auto"
+          aria-hidden="true"
+          // A browser extension (video downloader / media-control style)
+          // commonly stamps its own attribute (e.g. `data-video`) onto <video>
+          // elements before React hydrates, which then trips a false-positive
+          // hydration mismatch — nothing in our own render actually differs.
+          suppressHydrationWarning
+        />
         <canvas
           ref={topCanvasRef}
           aria-hidden="true"

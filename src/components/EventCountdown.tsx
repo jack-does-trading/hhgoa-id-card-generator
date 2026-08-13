@@ -18,6 +18,8 @@ function subscribeReducedMotion(onChange: () => void) {
 const TYPE_MS_PER_CHAR = 45;
 const DELETE_MS_PER_CHAR = 28;
 const HOLD_MS = 1400; // how long a fully-typed phrase sits before deleting
+// Reduced-motion path: phrases swap whole at this cadence, no typing.
+const REDUCED_SWAP_MS = 4000;
 
 /**
  * Minimal countdown ticker, pinned to the top-left corner. Mounted once at
@@ -52,6 +54,23 @@ export default function EventCountdown() {
     () => window.matchMedia(REDUCED_MOTION).matches,
     () => false // server: assume motion is fine, the effect never runs there
   );
+
+  // Reduced motion still gets to change — it just doesn't get *animated*.
+  // Previously this branch bailed out entirely, which left the corner sitting
+  // on one frozen phrase with a dead caret; on an iPhone with Reduce Motion
+  // switched on (which is common) the whole element read as broken. The
+  // preference is about vestibular motion — sliding, parallax, per-character
+  // typing — not about content ever updating, so the phrases still rotate
+  // here, just swapped whole on a slow timer instead of typed out.
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  useEffect(() => {
+    if (!reduced || labels.length <= 1) return;
+    const id = setInterval(
+      () => setPhraseIndex((i) => (i + 1) % labels.length),
+      REDUCED_SWAP_MS
+    );
+    return () => clearInterval(id);
+  }, [reduced, labels]);
 
   useEffect(() => {
     if (reduced || labels.length <= 1) return;
@@ -99,7 +118,9 @@ export default function EventCountdown() {
     >
       {/* Reduced motion gets the full phrase outright — no typing pass, so
          `typed` is never populated in that mode and would render empty. */}
-      <span>{reduced ? labels[0] ?? "" : typed}</span>
+      <span>
+        {reduced ? labels[phraseIndex % labels.length] ?? "" : typed}
+      </span>
       {/* A slim CSS bar rather than a Unicode block glyph — much finer and
          width-controllable at this font size than "▎" reads as. */}
       <span
